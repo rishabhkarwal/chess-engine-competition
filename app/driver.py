@@ -8,7 +8,7 @@ from rich.console import Console
 import chess
 import re
 
-_console = Console()
+_console = Console(stderr=True) # so doesn't affect UCI loop
 
 style = lambda text, colour : f'[{colour}]{text}[/{colour}]'
 
@@ -178,7 +178,7 @@ class Engine:
         ctx.padding = 0
         ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
 
-        log(info(f'go startpos depth {self.depth}'))
+        log(info(f'{position} @ depth {self.depth}'))
 
         with self.capturer:
             run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
@@ -194,8 +194,3 @@ class Engine:
                 print(f"info depth {d} score cp {cp}")
         
         return Engine.move_to_str(best_move_out.value)
-
-if __name__ == '__main__':
-    engine = Engine()
-    move = engine.get_best_move('7K/3r4/1n6/8/8/8/5N2/k7 b - - 0 1')
-    print(f'bestmove {move or '0000'}')
