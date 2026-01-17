@@ -6,7 +6,6 @@ from tqdm import tqdm
 from contextlib import redirect_stdout
 from driver import Engine
 import math
-import datetime
 
 COMPETITION_DEPTH = 5
 LOG_FILE = 'history.csv'
@@ -49,8 +48,8 @@ def save_history(A, B, games):
     # format data
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    csv_line = (f'{timestamp},'
-                f'{A.strategy},'
+    
+    csv_line = (f'{A.strategy},'
                 f'{B.strategy},'
                 f'{games},'
                 f'{A.stats["W"]},'
@@ -62,7 +61,7 @@ def save_history(A, B, games):
     # write to file
     file_exists = os.path.isfile(LOG_FILE)
     with open(LOG_FILE, 'a') as f:
-        if not file_exists: f.write("Timestamp,New,Old,Games,W,D,L,Win Rate,Elo Difference\n") # create header if missing
+        if not file_exists: f.write("New,Old,Games,W,D,L,Win Rate,Elo Difference\n") # create header if missing
         f.write(csv_line)
         
     print(f'\nsaved result to \'{LOG_FILE}\'')
@@ -106,9 +105,9 @@ def match(A, B, games=10):
     [print(f'{player.strategy} : {player.stats["W"] + player.stats["D"] / 2 :.1f}') for player in [A, B]]
 
 if __name__ == '__main__':
-    a = sys.argv[1] if len(sys.argv) > 1 else 'material'
-    b = sys.argv[2] if len(sys.argv) > 2 else 'constant'
-    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    a = sys.argv[1] if len(sys.argv) > 1 else 'psqt'
+    b = sys.argv[2] if len(sys.argv) > 2 else 'material'
+    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 20
     engine_a, engine_b = Player(a), Player(b)
     match(engine_a, engine_b, n_games)
     save_history(engine_a, engine_b, n_games)
