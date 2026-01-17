@@ -3,23 +3,22 @@ import os
 import ctypes
 import numpy as np
 from numba import cfunc, types, carray
-from evaluation import evaluation_function
 import chess
 import time
 from functools import partial
 print = partial(print, flush=True)
 
-COMPETITION_DEPTH = 5
+def compile_wrapper(evaluation_function):
+    @cfunc(types.int32(types.CPointer(types.int64), types.CPointer(types.int64), types.uint32))
+    def wrapper(board_pieces_ptr, board_occupancy_ptr, side_to_move):
 
-@cfunc(types.int32(types.CPointer(types.int64), types.CPointer(types.int64), types.uint32))
-def evaluation_wrapper(board_pieces_ptr, board_occupancy_ptr, side_to_move):
-
-    board_pieces = carray(board_pieces_ptr, (12,), np.int64)
-    board_occupancy = carray(board_occupancy_ptr, (3,), np.int64)
-    
-    score = evaluation_function(board_pieces, board_occupancy, side_to_move)
-    
-    return np.int32(score)
+        board_pieces = carray(board_pieces_ptr, (12,), np.int64)
+        board_occupancy = carray(board_occupancy_ptr, (3,), np.int64)
+        
+        score = evaluation_function(board_pieces, board_occupancy, side_to_move)
+        
+        return np.int32(score)
+    return wrapper
 
 # the c structures in python
 class SearchContext(ctypes.Structure):
@@ -67,7 +66,7 @@ class OutputCapturer:
         return self.captured.splitlines()
 
 class Engine:
-    def __init__(self, depth = COMPETITION_DEPTH):
+    def __init__(self, evaluation_function, depth):
         base_address = self._init_dll()._handle # base address of the loaded module in memory
         self._init_tables(base_address)
 
@@ -88,6 +87,7 @@ class Engine:
             ctypes.POINTER(ctypes.c_int32) # arg 4: stats array
         )
 
+        self.evaluation = compile_wrapper(evaluation_function)
         self.depth = depth
 
     def _init_dll(self):
@@ -166,7 +166,7 @@ class Engine:
         ctx = SearchContext()
         ctx.depth = self.depth
         ctx.padding = 0
-        ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
+        ctx.callback_ptr = ctypes.cast(self.evaluation.address, ctypes.c_void_p)
 
         print(f'info string: {board.fen()} @ depth {self.depth}')
 

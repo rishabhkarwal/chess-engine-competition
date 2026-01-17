@@ -2,13 +2,15 @@ import sys
 import chess
 from driver import Engine
 from functools import partial
+import importlib
 
 NAME = 'Engine'
 AUTHOR = 'Rish'
+COMPETITION_DEPTH = 5
 
 print = partial(print, flush=True)
 
-def uci_loop():
+def uci_loop(evaluation_function):
     engine = None
     board = chess.Board()
 
@@ -33,7 +35,7 @@ def uci_loop():
             print('uciok')
 
         elif cmd == 'isready':
-            if engine is None: engine = Engine()
+            if engine is None: engine = Engine(evaluation_function, depth = COMPETITION_DEPTH)
             print('readyok')
 
         elif cmd == 'ucinewgame':
@@ -73,4 +75,19 @@ def uci_loop():
         elif cmd == 'quit': break
 
 if __name__ == '__main__':
-    uci_loop()
+    strategy = 'constant'
+    if len(sys.argv) > 1: strategy = sys.argv[1]
+
+    try:
+        # import 'evaluation.X'
+        module_name = f'evaluation.{strategy}'
+        module = importlib.import_module(module_name)
+        
+        # get the function
+        function = module.evaluation_function
+        
+        # start UCI loop with this function
+        uci_loop(function)
+        
+    except ImportError as e:
+        print(f'info string (error): cannot load strategy \'{strategy}\' || {str(e).lower()}')
