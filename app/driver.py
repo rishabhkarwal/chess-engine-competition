@@ -9,10 +9,14 @@ import chess
 
 _console = Console()
 
+style = lambda text, colour : f'[{colour}]{text}[/{colour}]'
+
+def info(string): return style(f'info: {string}', 'bold yellow')
+def error(string): return style(f'error: {string}', 'bold red')
+
 def log(text : str):
     _console.log(text)
 
-BRAIN_OFFSET = 0x4EE0 # magic offset for search function (windows)
 COMPETITION_DEPTH = 5
 
 @cfunc(types.int32(types.CPointer(types.int64), types.CPointer(types.int64), types.uint32))
@@ -36,17 +40,12 @@ class SearchContext(ctypes.Structure):
 
 class Engine:
     def __init__(self, depth = COMPETITION_DEPTH):
-        curr_dir = os.path.dirname(os.path.abspath(__file__))
-        lib_path = os.path.join(curr_dir, '..', 'bindings', 'ChessLib.dll')
+        base_address = self._init_dll()._handle # base address of the loaded module in memory
+        self._init_tables(base_address)
         
-        try:
-            dll = ctypes.CDLL(lib_path)
-        except OSError:
-            log('[bold red]Error:[/bold red] could not load ChessLib.dll')
-            return '0000'
-
+        BRAIN_OFFSET = 0x4EE0 # magic offset for search function (windows)
+        
         # calculate the hidden function address
-        base_address = dll._handle # base address of the loaded module in memory
         self.brain_address = base_address + BRAIN_OFFSET
 
         # define the function signature
@@ -60,6 +59,23 @@ class Engine:
         )
 
         self.depth = depth
+
+    def _init_dll(self):
+        lib = 'ChessLib.dll'
+        curr_dir = os.path.dirname(os.path.abspath(__file__))
+        lib_path = os.path.join(curr_dir, '..', 'bindings', lib)
+        
+        try: return ctypes.CDLL(lib_path)
+        except OSError: log(error(f'could not load {lib}'))
+
+    def _init_tables(self, base_address):
+        INIT_OFFSET = 0x2100 # magic offset for precomputed move tables (windows)
+        # needed so engine can make non-pawn moves
+        try:
+            ctypes.CFUNCTYPE(None)(base_address + INIT_OFFSET)()
+            log(info('precomputed tables initialised'))
+        except Exception as e:
+            log(error('initialisation failed'))
 
     @staticmethod
     def move_to_str(move : int) -> str:
@@ -112,12 +128,12 @@ class Engine:
         ctx.padding = 0
         ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
 
-        log(f'go startpos depth {self.depth}')
+        log(info(f'go startpos depth {self.depth}'))
         run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
         
         return Engine.move_to_str(best_move_out.value)
 
 if __name__ == '__main__':
     engine = Engine()
-    move = engine.get_best_move('r1k5/2P2K2/3Rp3/7p/1p4P1/P1P1b3/p1P5/1N2N3 w - - 0 1')
-    print(f'best move {move}')
+    move = engine.get_best_move('7K/3r4/1n6/8/8/8/5N2/k7 b - - 0 1')
+    print(f'best move {move or '0000'}')
