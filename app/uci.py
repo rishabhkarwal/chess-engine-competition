@@ -72,6 +72,9 @@ def uci_loop(evaluation_function):
             best_move = engine.get_best_move(board)
             print(f'bestmove {best_move}')
 
+        elif cmd == 'd':
+            print(board)
+
         elif cmd == 'quit': break
 
 if __name__ == '__main__':
