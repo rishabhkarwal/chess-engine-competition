@@ -182,6 +182,6 @@ class Engine:
             # format: 'Info: Depth 5 Score: 500'
             parts = line.split() 
             print(f'info depth {parts[2]} score cp {parts[4]}')
-        print(f'info depth time {duration}')
+        print(f'info time {duration}')
         
         return Engine.move_to_str(best_move_out.value)
