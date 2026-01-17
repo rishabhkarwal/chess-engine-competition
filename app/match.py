@@ -5,8 +5,11 @@ import importlib
 from tqdm import tqdm
 from contextlib import redirect_stdout
 from driver import Engine
+import math
+import datetime
 
 COMPETITION_DEPTH = 5
+LOG_FILE = 'history.csv'
 
 class Player:
     def __init__(self, strategy):
@@ -30,6 +33,39 @@ def play_game(white, black):
             board.push(chess.Move.from_uci(move_str))
             
     return board.result()
+
+def save_history(A, B, games):
+    # calculate score
+    score = A.stats['W'] + (A.stats['D'] * 0.5)
+    total = games
+    
+    # calculate win rate %
+    win_rate = score / total
+    
+    # calculate Elo difference
+    clamped_score = max(0.01, min(0.99, win_rate))
+    elo_diff = -400 * math.log10(1 / clamped_score - 1)
+    
+    # format data
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    csv_line = (f'{timestamp},'
+                f'{A.strategy},'
+                f'{B.strategy},'
+                f'{games},'
+                f'{A.stats["W"]},'
+                f'{A.stats["D"]},'
+                f'{A.stats["L"]},'
+                f'{win_rate * 100:.1f}%,'
+                f'{elo_diff :+.0f}\n')
+    
+    # write to file
+    file_exists = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, 'a') as f:
+        if not file_exists: f.write("Timestamp,New,Old,Games,W,D,L,Win Rate,Elo Difference\n") # create header if missing
+        f.write(csv_line)
+        
+    print(f'\nsaved result to \'{LOG_FILE}\'')
 
 def match(A, B, games=10):
     # progress bar
@@ -75,3 +111,4 @@ if __name__ == '__main__':
     n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     engine_a, engine_b = Player(a), Player(b)
     match(engine_a, engine_b, n_games)
+    save_history(engine_a, engine_b, n_games)
