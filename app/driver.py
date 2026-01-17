@@ -78,13 +78,24 @@ class Engine:
             log(error('initialisation failed'))
 
     @staticmethod
-    def move_to_str(move : int) -> str:
-        # parse output (has been bit-packed)
+    def move_to_str(move: int) -> str:
+        if move == 0: return '0000'
+
         from_sq = move & 0x3F
         to_sq = (move >> 6) & 0x3F
-        if from_sq == to_sq: return '0000'
+        flags = (move >> 12) & 0xF
+
         files = 'abcdefgh'
-        return f'{files[from_sq % 8]}{from_sq // 8 + 1}{files[to_sq % 8]}{to_sq // 8 + 1}'
+        move_str = f'{files[from_sq % 8]}{from_sq // 8 + 1}{files[to_sq % 8]}{to_sq // 8 + 1}'
+
+        if flags & 0x8: # if the 4th bit is set, it's a promotion
+            kind = flags & 0x3 # bottom 2 bits
+            if kind == 0: move_str += 'n' # 00 = knight
+            elif kind == 1: move_str += 'b' # 01 = bishop
+            elif kind == 2: move_str += 'r' # 10 = rook
+            elif kind == 3: move_str += 'q' # 11 = queen
+
+        return move_str
 
     @staticmethod
     def get_board(fen : str):
