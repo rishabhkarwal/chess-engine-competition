@@ -1,9 +1,12 @@
 import sys
 import chess
 from driver import Engine
+from functools import partial
 
 NAME = 'Engine'
 AUTHOR = 'Rish'
+
+print = partial(print, flush=True)
 
 def uci_loop():
     engine = None

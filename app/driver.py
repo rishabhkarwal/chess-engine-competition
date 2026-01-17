@@ -4,19 +4,10 @@ import ctypes
 import numpy as np
 from numba import cfunc, types, carray
 from evaluation import evaluation_function
-from rich.console import Console
 import chess
 import re
-
-_console = Console(stderr=True) # so doesn't affect UCI loop
-
-style = lambda text, colour : f'[{colour}]{text}[/{colour}]'
-
-def info(string): return style(f'info: {string}', 'bold yellow')
-def error(string): return style(f'error: {string}', 'bold red')
-
-def log(text : str):
-    _console.log(text)
+from functools import partial
+print = partial(print, flush=True)
 
 COMPETITION_DEPTH = 5
 
@@ -105,16 +96,16 @@ class Engine:
         lib_path = os.path.join(curr_dir, '..', 'bindings', lib)
         
         try: return ctypes.CDLL(lib_path)
-        except OSError: log(error(f'could not load {lib}'))
+        except OSError: print(f'info string (error): couldn\'t load {lib}')
 
     def _init_tables(self, base_address):
         INIT_OFFSET = 0x2100 # magic offset for precomputed move tables (windows)
         # needed so engine can make non-pawn moves
         try:
             ctypes.CFUNCTYPE(None)(base_address + INIT_OFFSET)()
-            log(info('precomputed tables initialised'))
+            print(f'info string: loaded precomputed tables')
         except Exception as e:
-            log(error('initialisation failed'))
+            print(f'info string (error): initialisation failed')
 
     @staticmethod
     def move_to_str(move: int) -> str:
@@ -177,19 +168,16 @@ class Engine:
         ctx.padding = 0
         ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
 
-        log(info(f'{board.fen()} @ depth {self.depth}'))
+        print(f'info string: {board.fen()} @ depth {self.depth}')
 
         with self.capturer:
             run_search(ctypes.byref(best_move_out), c_board, ctypes.byref(ctx), stats_out)
         
         # parse the captured lines
         for line in self.capturer.get_lines():
-            # match: "Info: Depth X Score: X"
-            match = re.search(r'Info: Depth (\d+) Score: (-?\d+)', line)
-            if match:
-                d = match.group(1)
-                cp = match.group(2)
-                # print standard UCI format
-                print(f"info depth {d} score cp {cp}")
+            # minimal parsing for speed
+            # format: "Info: Depth 5 Score: 500"
+            parts = line.split() 
+            print(f"info depth {parts[2]} score cp {parts[4]}")
         
         return Engine.move_to_str(best_move_out.value)
