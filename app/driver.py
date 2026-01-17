@@ -137,8 +137,7 @@ class Engine:
         return move_str
 
     @staticmethod
-    def get_board(fen : str):
-        board = chess.Board(fen)
+    def get_board(board: chess.Board):
         arr = (ctypes.c_uint64 * 32)()
 
         # pieces
@@ -164,10 +163,10 @@ class Engine:
 
         return arr
 
-    def get_best_move(self, position : str = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'):
+    def get_best_move(self, board: chess.Board):
         run_search = self.BrainFuncType(self.brain_address)
         
-        board = Engine.get_board(position)
+        c_board = Engine.get_board(board)
 
         # setup call arguments
         best_move_out = ctypes.c_int16(0)
@@ -178,10 +177,10 @@ class Engine:
         ctx.padding = 0
         ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
 
-        log(info(f'{position} @ depth {self.depth}'))
+        log(info(f'{board.fen()} @ depth {self.depth}'))
 
         with self.capturer:
-            run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
+            run_search(ctypes.byref(best_move_out), c_board, ctypes.byref(ctx), stats_out)
         
         # parse the captured lines
         for line in self.capturer.get_lines():

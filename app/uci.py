@@ -64,7 +64,7 @@ def uci_loop():
                     engine.depth = int(parts[idx + 1])
                     # update engine depth
             
-            best_move = engine.get_best_move(board.fen())
+            best_move = engine.get_best_move(board)
             print(f'bestmove {best_move}')
 
         elif cmd == 'quit': break
