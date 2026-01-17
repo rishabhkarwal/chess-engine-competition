@@ -6,6 +6,7 @@ from numba import cfunc, types, carray
 from evaluation import evaluation_function
 from rich.console import Console
 import chess
+import re
 
 _console = Console()
 
@@ -38,33 +39,48 @@ class SearchContext(ctypes.Structure):
         ('callback_ptr', ctypes.c_void_p) # pointer to the python function
     ]
 
-# context manager to suppress c output
-class OutputSilencer:
+# context manager to capture c output and parse
+class OutputCapturer:
+    def __init__(self):
+        self.captured = ""
+
     def __enter__(self):
-        # open the "null" device
-        self.null_fd = os.open(os.devnull, os.O_RDWR)
+        # flush buffer so we don't mix old data
+        sys.stdout.flush()
         
-        # save a copy of the actual stdout so we can restore it later
+        # save original stdout
         self.save_stdout = os.dup(1)
         
-        # redirect stdout to the null device
-        sys.stdout.flush() # flush Python buffer first
-        os.dup2(self.null_fd, 1)
+        # create a read and write pipe
+        self.pipe_r, self.pipe_w = os.pipe()
+        
+        # redirect stdout to the write end of the pipe
+        # anything the c code prints goes into the pipe
+        os.dup2(self.pipe_w, 1)
+        
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # restore stdout
-        sys.stdout.flush()
-        os.dup2(self.save_stdout, 1)
+        # close the write end of the pipe
+        os.close(self.pipe_w)
         
-        # clean up
-        os.close(self.null_fd)
+        # restore stdout so python printing works again
+        os.dup2(self.save_stdout, 1)
         os.close(self.save_stdout)
+        
+        # read everything from the pipe
+        with os.fdopen(self.pipe_r) as pipe_reader:
+            self.captured = pipe_reader.read()
+
+    def get_lines(self):
+        return self.captured.splitlines()
 
 class Engine:
     def __init__(self, depth = COMPETITION_DEPTH):
         base_address = self._init_dll()._handle # base address of the loaded module in memory
         self._init_tables(base_address)
+
+        self.capturer = OutputCapturer()
         
         BRAIN_OFFSET = 0x4EE0 # magic offset for search function (windows)
         
@@ -164,12 +180,22 @@ class Engine:
 
         log(info(f'go startpos depth {self.depth}'))
 
-        with OutputSilencer():
+        with self.capturer:
             run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
+        
+        # parse the captured lines
+        for line in self.capturer.get_lines():
+            # match: "Info: Depth X Score: X"
+            match = re.search(r'Info: Depth (\d+) Score: (-?\d+)', line)
+            if match:
+                d = match.group(1)
+                cp = match.group(2)
+                # print standard UCI format
+                print(f"info depth {d} score cp {cp}")
         
         return Engine.move_to_str(best_move_out.value)
 
 if __name__ == '__main__':
     engine = Engine()
     move = engine.get_best_move('7K/3r4/1n6/8/8/8/5N2/k7 b - - 0 1')
-    print(f'best move {move or '0000'}')
+    print(f'bestmove {move or '0000'}')
