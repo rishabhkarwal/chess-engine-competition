@@ -5,6 +5,7 @@ import numpy as np
 from numba import cfunc, types, carray
 from evaluation import evaluation_function
 from rich.console import Console
+import chess
 
 _console = Console()
 
@@ -42,29 +43,32 @@ def move_to_str(move : int) -> str:
     files = 'abcdefgh'
     return f'{files[from_sq % 8]}{from_sq // 8 + 1}{files[to_sq % 8]}{to_sq // 8 + 1}'
 
-def setup_board():
-    # setup the board (start position)
-    BoardArrayType = ctypes.c_uint64 * 32 # works at 17 but not any lower ? 
-    board = BoardArrayType()
+def get_board(fen : str):
+    board = chess.Board(fen)
+    arr = (ctypes.c_uint64 * 32)()
 
-    # initialise white pieces
-    board[0] = 0xFF00; board[1] = 0x42; board[2] = 0x24; 
-    board[3] = 0x81;   board[4] = 0x08; board[5] = 0x10;
-    # initialise black pieces
-    board[6] = 0xFF000000000000; board[7] = 0x4200000000000000; board[8] = 0x2400000000000000;
-    board[9] = 0x8100000000000000; board[10]= 0x0800000000000000; board[11]= 0x1000000000000000;
-    
-    # calculate occupancy
-    white = 0
-    black = 0
-    for i in range(6): white |= board[i]
-    for i in range(6, 12): black |= board[i]
-    
-    board[12] = white
-    board[13] = black
-    board[14] = white | black
+    # pieces
+    for i, pt in enumerate([chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN, chess.KING]):
+        arr[i] = board.pieces_mask(pt, chess.WHITE)
+        arr[i + 6] = board.pieces_mask(pt, chess.BLACK)
 
-    return board
+    # occupancy 12-14
+    arr[12] = board.occupied_co[chess.WHITE]
+    arr[13] = board.occupied_co[chess.BLACK]
+    arr[14] = board.occupied
+
+    # state 15-16
+    ep = (board.ep_square + 1) if board.ep_square is not None else 0
+    arr[15] = (0 if board.turn == chess.WHITE else 1) | (ep << 32)
+    
+    castling = 0
+    if board.has_kingside_castling_rights(chess.WHITE): castling |= 1
+    if board.has_queenside_castling_rights(chess.WHITE): castling |= 2
+    if board.has_kingside_castling_rights(chess.BLACK): castling |= 4
+    if board.has_queenside_castling_rights(chess.BLACK): castling |= 8
+    arr[16] = castling
+
+    return arr
 
 def get_best_move(depth=5):
     curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -93,7 +97,8 @@ def get_best_move(depth=5):
     # create the callable object from the address
     run_search = BrainFuncType(brain_address)
 
-    board = setup_board()
+    position = '7b/6P1/3N4/B5K1/3pPP2/pr1k3B/r4R2/6Nb w - - 0 1'
+    board = get_board(position)
 
     # setup call arguments
     best_move_out = ctypes.c_int16(0)
