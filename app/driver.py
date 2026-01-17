@@ -38,6 +38,29 @@ class SearchContext(ctypes.Structure):
         ('callback_ptr', ctypes.c_void_p) # pointer to the python function
     ]
 
+# context manager to suppress c output
+class OutputSilencer:
+    def __enter__(self):
+        # open the "null" device
+        self.null_fd = os.open(os.devnull, os.O_RDWR)
+        
+        # save a copy of the actual stdout so we can restore it later
+        self.save_stdout = os.dup(1)
+        
+        # redirect stdout to the null device
+        sys.stdout.flush() # flush Python buffer first
+        os.dup2(self.null_fd, 1)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # restore stdout
+        sys.stdout.flush()
+        os.dup2(self.save_stdout, 1)
+        
+        # clean up
+        os.close(self.null_fd)
+        os.close(self.save_stdout)
+
 class Engine:
     def __init__(self, depth = COMPETITION_DEPTH):
         base_address = self._init_dll()._handle # base address of the loaded module in memory
@@ -140,7 +163,9 @@ class Engine:
         ctx.callback_ptr = ctypes.cast(evaluation_wrapper.address, ctypes.c_void_p)
 
         log(info(f'go startpos depth {self.depth}'))
-        run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
+
+        with OutputSilencer():
+            run_search(ctypes.byref(best_move_out), board, ctypes.byref(ctx), stats_out)
         
         return Engine.move_to_str(best_move_out.value)
 
