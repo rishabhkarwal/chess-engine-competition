@@ -5,7 +5,7 @@ import numpy as np
 from numba import cfunc, types, carray
 from evaluation import evaluation_function
 import chess
-import re
+import time
 from functools import partial
 print = partial(print, flush=True)
 
@@ -33,7 +33,7 @@ class SearchContext(ctypes.Structure):
 # context manager to capture c output and parse
 class OutputCapturer:
     def __init__(self):
-        self.captured = ""
+        self.captured = ''
 
     def __enter__(self):
         # flush buffer so we don't mix old data
@@ -170,14 +170,18 @@ class Engine:
 
         print(f'info string: {board.fen()} @ depth {self.depth}')
 
+        start_time = time.perf_counter()
         with self.capturer:
             run_search(ctypes.byref(best_move_out), c_board, ctypes.byref(ctx), stats_out)
+        end_time = time.perf_counter()
+        duration = int((end_time - start_time) * 1000) # in milliseconds
         
         # parse the captured lines
         for line in self.capturer.get_lines():
             # minimal parsing for speed
-            # format: "Info: Depth 5 Score: 500"
+            # format: 'Info: Depth 5 Score: 500'
             parts = line.split() 
-            print(f"info depth {parts[2]} score cp {parts[4]}")
+            print(f'info depth {parts[2]} score cp {parts[4]}')
+        print(f'info depth time {duration}')
         
         return Engine.move_to_str(best_move_out.value)
