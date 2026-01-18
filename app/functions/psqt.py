@@ -1,19 +1,17 @@
+"""Simple piece-square table implementation"""
+
 import board_tools as bt
-from numba import njit, int64, int32, uint32
+from numba import njit, int64, int32, uint32, uint64
+import numpy as np
 
 # piece values
-PAWN   = 100
-KNIGHT = 320
-BISHOP = 330
-ROOK   = 500
-QUEEN  = 900
-KING   = 20000
+PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 100, 320, 330, 500, 900, 20000
 
 # piece-square tables
 # NOTE: defined from white's perspective
 
 # pawn: encourage pushing to centre and promotion
-pawn_table = (
+_p = (
      0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
     10, 10, 20, 30, 30, 20, 10, 10,
@@ -25,7 +23,7 @@ pawn_table = (
 )
 
 # knight: strong in centre, weak in corners
-knight_table = (
+_n = (
     -50,-40,-30,-30,-30,-30,-40,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
     -30,  0, 10, 15, 15, 10,  0,-30,
@@ -37,7 +35,7 @@ knight_table = (
 )
 
 # bishop: avoid corners, control diagonals
-bishop_table = (
+_b = (
     -20,-10,-10,-10,-10,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
@@ -49,7 +47,7 @@ bishop_table = (
 )
 
 # rook: loves 7th rank and centre files
-rook_table = (
+_r = (
       0,  0,  0,  0,  0,  0,  0,  0,
       5, 10, 10, 10, 10, 10, 10,  5,
      -5,  0,  0,  0,  0,  0,  0, -5,
@@ -61,7 +59,7 @@ rook_table = (
 )
 
 # queen: slight preference for centre, keep mobile
-queen_table = (
+_q = (
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5,  5,  5,  5,  0,-10,
@@ -73,7 +71,7 @@ queen_table = (
 )
 
 # king: hide in castle during middlegame (safety)
-king_table = (
+_k = (
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -84,34 +82,46 @@ king_table = (
      20, 30, 10,  0,  0, 10, 30, 20
 )
 
+PSQTs = np.zeros((6, 64), dtype=np.int32)
+PSQTs[0] = np.array(_p, dtype=np.int32) + PAWN
+PSQTs[1] = np.array(_n, dtype=np.int32) + KNIGHT
+PSQTs[2] = np.array(_b, dtype=np.int32) + BISHOP
+PSQTs[3] = np.array(_r, dtype=np.int32) + ROOK
+PSQTs[4] = np.array(_q, dtype=np.int32) + QUEEN
+PSQTs[5] = np.array(_k, dtype=np.int32) + KING
+
+DE_BRUIJN_MAGIC = uint64(0x03f79d71b4cb0a89)
+DE_BRUIJN_LOOKUP = np.array([
+    0,   1, 48,  2, 57, 49, 28, 3,
+    61, 58, 50, 42, 38, 29, 17, 4,
+    62, 55, 59, 36, 53, 51, 43, 22,
+    45, 39, 33, 30, 24, 18, 12, 5,
+    63, 47, 56, 27, 60, 41, 37, 16,
+    54, 35, 52, 21, 44, 32, 23, 11,
+    46, 26, 40, 15, 34, 20, 31, 10,
+    25, 14, 19,  9, 13,  8,  7,  6
+], dtype=np.int32)
+
 @njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
     score = 0
+    occupancy = uint64(board_occupancy[2])
 
-    for sq in range(64):
+    # local references of globals
+    tables = PSQTs
+    lookup = DE_BRUIJN_LOOKUP
+    magic = DE_BRUIJN_MAGIC
+
+    while occupancy:
+        lsb = occupancy & (~occupancy + uint64(1))
+        sq = lookup[((lsb * magic) >> uint64(58))] # de bruijn scan
+        
         piece = bt.get_piece(board_pieces, sq)
-        
-        if piece == 0: continue
-
         # white
-        if piece == bt.WHITE_PAWN: score += PAWN + pawn_table[sq]
-        elif piece == bt.WHITE_KNIGHT: score += KNIGHT + knight_table[sq]
-        elif piece == bt.WHITE_BISHOP: score += BISHOP + bishop_table[sq]
-        elif piece == bt.WHITE_ROOK: score += ROOK + rook_table[sq]
-        elif piece == bt.WHITE_QUEEN: score += QUEEN + queen_table[sq]
-        elif piece == bt.WHITE_KING: score += KING + king_table[sq]
-
+        if piece <= 5: score += tables[piece, sq]
         # black
-        # mirror the square index to read the table from black's perspective
-        else:
-            sq = sq ^ 56
-        
-            if piece == bt.BLACK_PAWN: score -= PAWN + pawn_table[sq]
-            elif piece == bt.BLACK_KNIGHT: score -= KNIGHT + knight_table[sq]
-            elif piece == bt.BLACK_BISHOP: score -= BISHOP + bishop_table[sq]
-            elif piece == bt.BLACK_ROOK: score -= ROOK + rook_table[sq]
-            elif piece == bt.BLACK_QUEEN: score -= QUEEN + queen_table[sq]
-            elif piece == bt.BLACK_KING: score -= KING + king_table[sq]
+        elif piece <= 11: score -= tables[piece - 6, sq ^ 56]
 
-    if side_to_move == 1: return -score # black
-    return score
+        occupancy ^= lsb
+
+    return -score if side_to_move == 1 else score

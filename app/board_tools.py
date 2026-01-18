@@ -1,45 +1,36 @@
 from numba import njit, int64, int32
-
+import numpy as np
 
 """Piece IDs"""
-WHITE_PAWN = 1
-WHITE_KNIGHT = 2
-WHITE_BISHOP = 3
-WHITE_ROOK = 4
-WHITE_QUEEN = 5
-WHITE_KING = 6
+WHITE_PAWN   = 0
+WHITE_KNIGHT = 1
+WHITE_BISHOP = 2
+WHITE_ROOK   = 3
+WHITE_QUEEN  = 4
+WHITE_KING   = 5
 
-BLACK_PAWN = -1
-BLACK_KNIGHT = -2
-BLACK_BISHOP = -3
-BLACK_ROOK = -4
-BLACK_QUEEN = -5
-BLACK_KING = -6
+BLACK_PAWN   = 6
+BLACK_KNIGHT = 7
+BLACK_BISHOP = 8
+BLACK_ROOK   = 9
+BLACK_QUEEN  = 10
+BLACK_KING   = 11
 
+EMPTY = 12
 
 @njit(int32(int64[:], int32))
 def get_piece(board_pieces, sq):
     """
     Returns the Piece ID at a specific square (0-63).
-    Returns 0 if empty.
     """
     mask = 1 << sq
 
-    if board_pieces[0] & mask: return 1
-    if board_pieces[1] & mask: return 2
-    if board_pieces[2] & mask: return 3
-    if board_pieces[3] & mask: return 4
-    if board_pieces[4] & mask: return 5
-    if board_pieces[5] & mask: return 6
+    # loop through the 12 bitboards (0-5 White, 6-11 Black)
+    for piece_idx in range(12):
+        if board_pieces[piece_idx] & mask:
+            return piece_idx
 
-    if board_pieces[6] & mask: return -1
-    if board_pieces[7] & mask: return -2
-    if board_pieces[8] & mask: return -3
-    if board_pieces[9] & mask: return -4
-    if board_pieces[10] & mask: return -5
-    if board_pieces[11] & mask: return -6
-
-    return 0
+    return EMPTY
 
 @njit(int32(int64[:], int32, int32))
 def check_square(board_occupancy, sq, color_idx):

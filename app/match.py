@@ -122,8 +122,6 @@ def match(A, B, games=10):
                         f'{black.strategy}: {black.get_stats()}')
             pbar.set_postfix_str(score_str)
 
-            
-
     except KeyboardInterrupt:
         pass
 

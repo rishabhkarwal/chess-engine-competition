@@ -1,3 +1,5 @@
+""" Simple material count of pieces on board """
+
 import board_tools as bt
 from numba import njit, int64, int32, uint32
 
