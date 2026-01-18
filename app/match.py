@@ -6,9 +6,13 @@ from tqdm import tqdm
 from contextlib import redirect_stdout
 from driver import Engine
 import math
+import random
+import time
+os.system('') # enable ANSI escape codes on windows
 
 COMPETITION_DEPTH = 5
 LOG_FILE = 'history.csv'
+START_POSITIONS = 'openings.txt'
 
 class Player:
     def __init__(self, strategy):
@@ -19,14 +23,20 @@ class Player:
     def load_engine(self):
         # suppress initialisation prints
         with open(os.devnull, 'w') as f, redirect_stdout(f):
-            module = importlib.import_module(f'evaluation.{self.strategy}')
+            module = importlib.import_module(f'functions.{self.strategy}')
             return Engine(module.evaluation_function, COMPETITION_DEPTH)
 
-def play_game(white, black):
-    board = chess.Board()
-    # suppress move printing during game
+    def get_stats(self):
+        return '/'.join(str(result) for result in self.stats.values())
+
+def play_game(white, black, start_fen = None):
+    board = chess.Board(start_fen) if start_fen else chess.Board()
+    # suppress info printing during game
     with open(os.devnull, 'w') as f, redirect_stdout(f):
         while not board.is_game_over():
+            chessboard = str(board)
+            sys.stderr.write(f"\033[{chessboard.count('\n') + 2}F")
+            sys.stderr.write(str(board) + '\n\n')
             engine = white.engine if board.turn == chess.WHITE else black.engine
             move_str = engine.get_best_move(board)
             board.push(chess.Move.from_uci(move_str))
@@ -34,6 +44,8 @@ def play_game(white, black):
     return board.result()
 
 def save_history(A, B, games):
+    if games == 0: return
+
     # calculate score
     score = A.stats['W'] + (A.stats['D'] * 0.5)
     total = games
@@ -44,10 +56,6 @@ def save_history(A, B, games):
     # calculate Elo difference
     clamped_score = max(0.01, min(0.99, win_rate))
     elo_diff = -400 * math.log10(1 / clamped_score - 1)
-    
-    # format data
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    
     
     csv_line = (f'{A.strategy},'
                 f'{B.strategy},'
@@ -67,47 +75,67 @@ def save_history(A, B, games):
     print(f'\nsaved result to \'{LOG_FILE}\'')
 
 def match(A, B, games=10):
-    # progress bar
-    pbar = tqdm(range(games), unit="game", dynamic_ncols=True)
-    
-    for i in pbar:
-        # swap sides
-        if i & 1:
-            white, black = B, A
-            A_is_white = False
-        else:
-            white, black = A, B
-            A_is_white = True
+    try:
+        played = 0
 
-        result = play_game(white, black)
+        openings = []
+        if os.path.exists(START_POSITIONS):
+            with open(START_POSITIONS, 'r') as f:
+                openings = [line.strip() for line in f if line.strip()]
 
-        # update stats
-        if result == '1/2-1/2':
-            A.stats['D'] += 1
-            B.stats['D'] += 1
-        elif result == '1-0':
-            if A_is_white:
-                A.stats['W'] += 1; B.stats['L'] += 1 # A won
-            else:           
-                B.stats['W'] += 1; A.stats['L'] += 1 # B won
-        elif result == '0-1':
-            if A_is_white: 
-                B.stats['W'] += 1; A.stats['L'] += 1 # B won
-            else:           
-                A.stats['W'] += 1; B.stats['L'] += 1 # A won
+        os.system('cls' if os.name == 'nt' else 'clear')
+        sys.stderr.write('\n' * 8 + '\n\n')
         
-        # update bar text
-        score_str = (f'{A.strategy}: {A.stats["W"]}/{A.stats["D"]}/{A.stats["L"]} | '
-                     f'{B.strategy}: {B.stats["W"]}/{B.stats["D"]}/{B.stats["L"]}')
-        pbar.set_postfix_str(score_str)
+        pbar = tqdm(range(games), unit="game", dynamic_ncols=True)
+        
+        for i in pbar:
+            # swap sides
+            if i & 1:
+                white, black = B, A
+            else:
+                white, black = A, B
+            
+            fen = random.choice(openings) if openings else None
+
+            pbar.set_description(f"{fen if fen else 'startpos'}")
+
+            # update bar text
+            score_str = (f'{white.strategy}: {white.get_stats()} | '
+                        f'{black.strategy}: {black.get_stats()}')
+            pbar.set_postfix_str(score_str)
+
+            result = play_game(white, black, fen)
+
+            # update stats
+            if result == '1/2-1/2':
+                white.stats['D'] += 1
+                black.stats['D'] += 1
+            elif result == '1-0':
+                white.stats['W'] += 1; black.stats['L'] += 1
+            elif result == '0-1':
+                black.stats['W'] += 1; white.stats['L'] += 1
+            
+            played += 1
+            
+            # update bar text
+            score_str = (f'{white.strategy}: {white.get_stats()} | '
+                        f'{black.strategy}: {black.get_stats()}')
+            pbar.set_postfix_str(score_str)
+
+            
+
+    except KeyboardInterrupt:
+        pass
 
     print('\n\n')
     [print(f'{player.strategy} : {player.stats["W"] + player.stats["D"] / 2 :.1f}') for player in [A, B]]
 
+    return played
+
 if __name__ == '__main__':
     a = sys.argv[1] if len(sys.argv) > 1 else 'psqt'
     b = sys.argv[2] if len(sys.argv) > 2 else 'material'
-    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
     engine_a, engine_b = Player(a), Player(b)
-    match(engine_a, engine_b, n_games)
-    save_history(engine_a, engine_b, n_games)
+    played = match(engine_a, engine_b, n_games)
+    save_history(engine_a, engine_b, played)
