@@ -82,13 +82,20 @@ _k = (
      20, 30, 10,  0,  0, 10, 30, 20
 )
 
+def flip_and_flatten(table_tuple):
+    """
+    Takes a tuple defined visually (Rank 8 top, Rank 1 bottom)
+    and flips it to match Little-Endian Bitboard memory (Rank 1 at start).
+    """
+    return np.array(table_tuple, dtype=np.int32).reshape(8, 8)[::-1].flatten()
+
 PSQTs = np.zeros((6, 64), dtype=np.int32)
-PSQTs[0] = np.array(_p, dtype=np.int32) + PAWN
-PSQTs[1] = np.array(_n, dtype=np.int32) + KNIGHT
-PSQTs[2] = np.array(_b, dtype=np.int32) + BISHOP
-PSQTs[3] = np.array(_r, dtype=np.int32) + ROOK
-PSQTs[4] = np.array(_q, dtype=np.int32) + QUEEN
-PSQTs[5] = np.array(_k, dtype=np.int32) + KING
+PSQTs[0] = flip_and_flatten(_p) + PAWN
+PSQTs[1] = flip_and_flatten(_n) + KNIGHT
+PSQTs[2] = flip_and_flatten(_b) + BISHOP
+PSQTs[3] = flip_and_flatten(_r) + ROOK
+PSQTs[4] = flip_and_flatten(_q) + QUEEN
+PSQTs[5] = flip_and_flatten(_k) + KING
 
 DE_BRUIJN_MAGIC = uint64(0x03f79d71b4cb0a89)
 DE_BRUIJN_LOOKUP = np.array([

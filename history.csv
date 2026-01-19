@@ -1,2 +1,3 @@
 New,Old,Games,W,D,L,Win Rate,Elo Difference
-psqt,material,244,46,195,3,58.8%,+62
+simple-psqt,material,244,46,195,3,58.8%,+62
+pesto-psqt,simple-psqt,94,12,73,9,51.6%,+11

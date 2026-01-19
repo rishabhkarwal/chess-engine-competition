@@ -131,8 +131,8 @@ def match(A, B, games=10):
     return played
 
 if __name__ == '__main__':
-    a = sys.argv[1] if len(sys.argv) > 1 else 'psqt'
-    b = sys.argv[2] if len(sys.argv) > 2 else 'material'
+    a = sys.argv[1] if len(sys.argv) > 1 else 'pesto-psqt'
+    b = sys.argv[2] if len(sys.argv) > 2 else 'simple-psqt'
     n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
     engine_a, engine_b = Player(a), Player(b)
     played = match(engine_a, engine_b, n_games)
