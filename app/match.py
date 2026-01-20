@@ -173,7 +173,7 @@ if __name__ == '__main__':
     
     a = sys.argv[1] if len(sys.argv) > 1 else 'mobility'
     b = sys.argv[2] if len(sys.argv) > 2 else 'tapered_eval'
-    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 200
+    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 2000
     
     match(a, b, n_games)
 

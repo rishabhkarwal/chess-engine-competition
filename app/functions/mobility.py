@@ -1,5 +1,3 @@
-"""Considers piece mobility"""
-
 import board_tools as bt
 from numba import njit, int64, int32, uint32, uint64
 import numpy as np
@@ -13,14 +11,15 @@ PHASE_SCORES = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 MOBILITY_MG = np.zeros((6, 28), dtype=np.int32)
 MOBILITY_EG = np.zeros((6, 28), dtype=np.int32)
 
-MOBILITY_MG[KNIGHT, :9] = np.array([-62, -53, -12, -4, 3, 13, 22, 28, 33])
-MOBILITY_EG[KNIGHT, :9] = np.array([-81, -56, -30, -14, 8, 15, 23, 27, 33])
-MOBILITY_MG[BISHOP, :14] = np.array([-59, -23, -3, 13, 24, 42, 54, 57, 65, 73, 78, 86, 95, 97])
-MOBILITY_EG[BISHOP, :14] = np.array([-59, -23, -3, 13, 24, 42, 54, 57, 65, 73, 78, 86, 95, 97])
-MOBILITY_MG[ROOK, :15] = np.array([-66, -53, -28, -9, 4, 16, 26, 38, 48, 55, 60, 64, 68, 71, 73])
-MOBILITY_EG[ROOK, :15] = np.array([-78, -54, -26, -9, 7, 22, 36, 52, 62, 70, 75, 78, 81, 83, 85])
-MOBILITY_MG[QUEEN, :28] = np.array([-30, -12, -8, -9, 20, 23, 23, 35, 38, 53, 64, 65, 65, 66, 67, 67, 72, 72, 77, 79, 93, 117, 122, 128, 141, 133, 165, 186])
-MOBILITY_EG[QUEEN, :28] = np.array([-48, -30, -7, 19, 40, 55, 59, 75, 78, 96, 96, 100, 121, 127, 131, 133, 136, 141, 147, 150, 151, 168, 168, 171, 182, 182, 192, 219])
+# mobility weights dampened
+MOBILITY_MG[KNIGHT, :9] = np.array([-62, -53, -12, -4, 3, 13, 22, 28, 33]) // 3
+MOBILITY_EG[KNIGHT, :9] = np.array([-81, -56, -30, -14, 8, 15, 23, 27, 33]) // 3
+MOBILITY_MG[BISHOP, :14] = np.array([-59, -23, -3, 13, 24, 42, 54, 57, 65, 73, 78, 86, 95, 97]) // 3
+MOBILITY_EG[BISHOP, :14] = np.array([-59, -23, -3, 13, 24, 42, 54, 57, 65, 73, 78, 86, 95, 97]) // 3
+MOBILITY_MG[ROOK, :15] = np.array([-66, -53, -28, -9, 4, 16, 26, 38, 48, 55, 60, 64, 68, 71, 73]) // 3
+MOBILITY_EG[ROOK, :15] = np.array([-78, -54, -26, -9, 7, 22, 36, 52, 62, 70, 75, 78, 81, 83, 85]) // 3
+MOBILITY_MG[QUEEN, :28] = np.array([-30, -12, -8, -9, 20, 23, 23, 35, 38, 53, 64, 65, 65, 66, 67, 67, 72, 72, 77, 79, 93, 117, 122, 128, 141, 133, 165, 186]) // 3
+MOBILITY_EG[QUEEN, :28] = np.array([-48, -30, -7, 19, 40, 55, 59, 75, 78, 96, 96, 100, 121, 127, 131, 133, 136, 141, 147, 150, 151, 168, 168, 171, 182, 182, 192, 219]) // 3
 
 mg_p = (0, 0, 0, 0, 0, 0, 0, 0, 98, 134, 61, 95, 68, 126, 34, -11, -6, 7, 26, 31, 65, 56, 25, -20, -14, 13, 6, 21, 23, 12, 17, -23, -27, -2, -5, 12, 17, 6, 10, -25, -26, -4, -4, -10, 3, 3, 33, -12, -35, -1, -20, -23, -15, 24, 38, -22, 0, 0, 0, 0, 0, 0, 0, 0)
 mg_n = (-167, -89, -34, -49, 61, -97, -15, -107, -73, -41, 72, 36, 23, 62, 7, -17, -47, 60, 37, 65, 84, 129, 73, 44, -9, 17, 19, 53, 37, 69, 18, 22, -13, 4, 16, 13, 28, 19, 21, -8, -23, -9, 12, 10, 19, 17, 25, -16, -29, -53, -12, -3, -1, 18, -14, -19, -105, -21, -58, -33, -17, -28, -19, -23)
@@ -46,7 +45,6 @@ def prepare_tables(tuples, materials):
 
 MG_TABLES = prepare_tables((mg_p, mg_n, mg_b, mg_r, mg_q, mg_k), MV_MG)
 EG_TABLES = prepare_tables((eg_p, eg_n, eg_b, eg_r, eg_q, eg_k), MV_EG)
-PHASE_WEIGHTS = np.concatenate((PHASE_SCORES, PHASE_SCORES))
 
 KNIGHT_ATTACKS = np.zeros(64, dtype=np.uint64)
 RAYS = np.zeros((64, 8), dtype=np.uint64)
@@ -82,15 +80,23 @@ def count_bits(n):
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
     mg_score = 0
     eg_score = 0
-    phase = 0
+    mg_mob = 0
+    eg_mob = 0
     
     white_occ = uint64(board_occupancy[0])
     black_occ = uint64(board_occupancy[1])
     all_occ = uint64(board_occupancy[2])
     
+    phase = 0
+    phase += (count_bits(uint64(board_pieces[1])) + count_bits(uint64(board_pieces[7]))) * 1
+    phase += (count_bits(uint64(board_pieces[2])) + count_bits(uint64(board_pieces[8]))) * 1
+    phase += (count_bits(uint64(board_pieces[3])) + count_bits(uint64(board_pieces[9]))) * 2
+    phase += (count_bits(uint64(board_pieces[4])) + count_bits(uint64(board_pieces[10]))) * 4
+
+    do_mobility = phase < 23
+
     mg_tab = MG_TABLES
     eg_tab = EG_TABLES
-    phase_w = PHASE_WEIGHTS
     lookup = DE_BRUIJN_LOOKUP
     magic = DE_BRUIJN_MAGIC
     rays = RAYS
@@ -100,8 +106,6 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
         if not bb: continue
 
         piece_idx = p_type % 6
-        p_weight = phase_w[p_type]
-        
         is_white = (p_type < 6)
         my_occ = white_occ if is_white else black_occ
 
@@ -109,17 +113,18 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
             lsb = bb & (~bb + uint64(1))
             sq = lookup[((lsb * magic) >> uint64(58))]
             
+            # 2. Material & PSQT (Always apply)
             mg_score += mg_tab[p_type, sq]
             eg_score += eg_tab[p_type, sq]
-            phase += p_weight
 
-            if 1 <= piece_idx <= 4:
+            # 3. Mobility (Conditional)
+            if do_mobility and 1 <= piece_idx <= 4:
                 attacks = uint64(0)
                 
                 if piece_idx == 1:
                     attacks = KNIGHT_ATTACKS[sq]
-                
                 else:
+                    # Sliders
                     if piece_idx == 2 or piece_idx == 4:
                         for d in range(4, 6):
                             r = rays[sq, d]
@@ -164,15 +169,20 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 count = count_bits(safe_moves)
                 
                 if is_white:
-                    mg_score += MOBILITY_MG[piece_idx, count]
-                    eg_score += MOBILITY_EG[piece_idx, count]
+                    mg_mob += MOBILITY_MG[piece_idx, count]
+                    eg_mob += MOBILITY_EG[piece_idx, count]
                 else:
-                    mg_score -= MOBILITY_MG[piece_idx, count]
-                    eg_score -= MOBILITY_EG[piece_idx, count]
+                    mg_mob -= MOBILITY_MG[piece_idx, count]
+                    eg_mob -= MOBILITY_EG[piece_idx, count]
 
             bb ^= lsb
 
+    if do_mobility:
+        mg_score += mg_mob
+        eg_score += eg_mob
+    
     if phase > 24: phase = 24
+    
     final = ((mg_score * phase) + (eg_score * (24 - phase))) // 24
 
     return -final if side_to_move == 1 else final
