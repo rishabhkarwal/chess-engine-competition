@@ -44,3 +44,6 @@ test_detail.xml
 
 # GUI
 imgui.ini
+
+# Stockfish
+stockfish/

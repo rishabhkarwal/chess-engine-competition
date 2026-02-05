@@ -1,1 +1,1 @@
-from functions.mobility import evaluation_function
+from functions.network import evaluation_function
