@@ -1,1 +1,1 @@
-from functions.network import evaluation_function
+from functions.hce import evaluation_function
