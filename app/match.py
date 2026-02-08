@@ -13,7 +13,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 
 os.system('') 
 
-COMPETITION_DEPTH = 4
+COMPETITION_DEPTH = 3
 LOG_FILE = 'history.csv'
 START_POSITIONS = 'openings.txt'
 
@@ -185,8 +185,8 @@ def match(strat_a, strat_b, games=10):
 if __name__ == '__main__':
     multiprocessing.freeze_support()
     
-    a = sys.argv[1] if len(sys.argv) > 1 else 'network'
-    b = sys.argv[2] if len(sys.argv) > 2 else 'material'
+    a = sys.argv[1] if len(sys.argv) > 1 else 'hce'
+    b = sys.argv[2] if len(sys.argv) > 2 else 'hce_complicated'
     n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 10000
     
     match(a, b, n_games)

@@ -51,7 +51,7 @@ def decode_weights():
         print(e)
 
 
-W1_FLAT, B1, W2, B2 = decode_weights()
+# W1_FLAT, B1, W2, B2 = decode_weights()
 
 
 @njit(int32(int64))
