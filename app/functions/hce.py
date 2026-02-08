@@ -14,8 +14,8 @@ MATERIAL_VALUE_EG = np.array([94, 281, 297, 512, 936, 0], dtype=np.int32)
 # Phase Values
 PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 MAX_PHASE = PHASE_WEIGHTS[KNIGHT] * 4 + PHASE_WEIGHTS[BISHOP] * 4 + PHASE_WEIGHTS[ROOK] * 4 + PHASE_WEIGHTS[QUEEN] * 2
-ENDGAME_PHASE = int(MAX_PHASE * 0.4)
-OPENING_PHASE = int(MAX_PHASE * 0.3)
+ENDGAME_PHASE = int(MAX_PHASE * 0.25)
+OPENING_PHASE = int(MAX_PHASE * 0.33)
 
 ## Penalties
 
@@ -370,6 +370,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     de_bruijn_magic = DE_BRUIJN_MAGIC
     sliding_rays = SLIDING_RAYS
     knight_attacks = KNIGHT_ATTACK_MASKS
+    king_attacks = KING_ATTACK_MASKS
     trapped_penalties = TRAPPED_PENALTY
     mobility_mg = MOBILITY_BONUS_MG
     mobility_eg = MOBILITY_BONUS_EG
@@ -628,20 +629,18 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     
     ## King Safety
     if is_opening:
-        # white king safety
+        # white king
         if white_king_square >= 0:
             king_file = white_king_square % 8
             king_rank = white_king_square // 8
             
-            # pawn shield bonus (pawns in front of king on castled flanks)
-            if king_file <= 2 or king_file >= 5:  # king on flank
+            # pawn shield
+            if king_file <= 2 or king_file >= 5:
                 shield_count = 0
                 
-                # check three files (king file and adjacent)
                 for file_offset in range(-1, 2):
                     check_file = king_file + file_offset
                     if 0 <= check_file < 8:
-                        # check ranks in front of king
                         for rank_offset in range(1, 3):
                             check_rank = king_rank + rank_offset
                             if check_rank < 8:
@@ -651,39 +650,110 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 
                 score_mg += shield_count * PAWN_SHIELD_BONUS_MG
             
-            # virtual king zone attacks (enemy pieces attacking king zone)
-            king_zone = KING_ATTACK_MASKS[white_king_square]
-            
-            # count enemy pieces attacking king zone
+            # king zone attacks (IMPROVED)
+            king_zone = king_attacks[white_king_square]
             enemy_attackers = 0
-            for piece_type in range(7, 11):  # black knights, bishops, rooks, queens
+            
+            for piece_type in range(7, 11):
                 piece_bb = uint64(board_pieces[piece_type])
                 
                 while piece_bb:
                     lsb = piece_bb & (~piece_bb + uint64(1))
                     piece_square = de_bruijn_lookup[((lsb * de_bruijn_magic) >> uint64(58))]
-                    
-                    # check if this piece attacks any square in king zone
                     piece_index = piece_type % 6
+                    
+                    attacks_zone = False
                     
                     if piece_index == KNIGHT:
                         if knight_attacks[piece_square] & king_zone:
-                            enemy_attackers += 1
-                    elif piece_index in (BISHOP, ROOK, QUEEN):
-                        # simplified: just check if piece can reach king zone
-                        if chebyshev_distance(piece_square, white_king_square) <= 2:
-                            enemy_attackers += 1
+                            attacks_zone = True
+                    
+                    elif piece_index == BISHOP:
+                        # check diagonal rays
+                        for direction in range(4, 8):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                # check if path is clear
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction >= 6:
+                                        temp = blockers
+                                        temp |= temp >> uint64(1); temp |= temp >> uint64(2); temp |= temp >> uint64(4)
+                                        temp |= temp >> uint64(8); temp |= temp >> uint64(16); temp |= temp >> uint64(32)
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    # check if any king zone square is reached before blocker
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    elif piece_index == ROOK:
+                        # check orthogonal rays
+                        for direction in range(4):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction in (1, 3):
+                                        temp = blockers
+                                        temp |= temp >> uint64(1); temp |= temp >> uint64(2); temp |= temp >> uint64(4)
+                                        temp |= temp >> uint64(8); temp |= temp >> uint64(16); temp |= temp >> uint64(32)
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    elif piece_index == QUEEN:
+                        # check all 8 rays
+                        for direction in range(8):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction in (1, 3, 6, 7):
+                                        temp = blockers
+                                        temp |= temp >> uint64(1); temp |= temp >> uint64(2); temp |= temp >> uint64(4)
+                                        temp |= temp >> uint64(8); temp |= temp >> uint64(16); temp |= temp >> uint64(32)
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    if attacks_zone:
+                        enemy_attackers += 1
                     
                     piece_bb ^= lsb
             
             score_mg -= enemy_attackers * KING_ZONE_ATTACK_PENALTY
         
-        # black king safety
+        # black king
         if black_king_square >= 0:
             king_file = black_king_square % 8
             king_rank = black_king_square // 8
             
-            # pawn shield
             if king_file <= 2 or king_file >= 5:
                 shield_count = 0
                 
@@ -699,11 +769,10 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 
                 score_mg -= shield_count * PAWN_SHIELD_BONUS_MG
             
-            # king zone attacks
-            king_zone = KING_ATTACK_MASKS[black_king_square]
+            king_zone = king_attacks[black_king_square]
             enemy_attackers = 0
             
-            for piece_type in range(1, 5):  # white knights, bishops, rooks, queens
+            for piece_type in range(1, 5):
                 piece_bb = uint64(board_pieces[piece_type])
                 
                 while piece_bb:
@@ -711,12 +780,83 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                     piece_square = de_bruijn_lookup[((lsb * de_bruijn_magic) >> uint64(58))]
                     piece_index = piece_type % 6
                     
+                    attacks_zone = False
+                    
                     if piece_index == KNIGHT:
                         if knight_attacks[piece_square] & king_zone:
-                            enemy_attackers += 1
-                    elif piece_index in (BISHOP, ROOK, QUEEN):
-                        if chebyshev_distance(piece_square, black_king_square) <= 2:
-                            enemy_attackers += 1
+                            attacks_zone = True
+                    
+                    elif piece_index == BISHOP:
+                        for direction in range(4, 8):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction >= 6:
+                                        temp = blockers
+                                        temp |= temp >> 1; temp |= temp >> 2; temp |= temp >> 4
+                                        temp |= temp >> 8; temp |= temp >> 16; temp |= temp >> 32
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    elif piece_index == ROOK:
+                        for direction in range(4):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction in (1, 3):
+                                        temp = blockers
+                                        temp |= temp >> 1; temp |= temp >> 2; temp |= temp >> 4
+                                        temp |= temp >> 8; temp |= temp >> 16; temp |= temp >> 32
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    elif piece_index == QUEEN:
+                        for direction in range(8):
+                            ray = sliding_rays[piece_square, direction]
+                            if ray & king_zone:
+                                blockers = ray & all_pieces
+                                if blockers:
+                                    if direction in (1, 3, 6, 7):
+                                        temp = blockers
+                                        temp |= temp >> 1; temp |= temp >> 2; temp |= temp >> 4
+                                        temp |= temp >> 8; temp |= temp >> 16; temp |= temp >> 32
+                                        first_blocker_square = de_bruijn_lookup[((temp * de_bruijn_magic) >> uint64(58))]
+                                    else:
+                                        first_blocker = blockers & (~blockers + uint64(1))
+                                        first_blocker_square = de_bruijn_lookup[((first_blocker * de_bruijn_magic) >> uint64(58))]
+                                    
+                                    clear_ray = ray ^ sliding_rays[first_blocker_square, direction]
+                                    if clear_ray & king_zone:
+                                        attacks_zone = True
+                                        break
+                                else:
+                                    attacks_zone = True
+                                    break
+                    
+                    if attacks_zone:
+                        enemy_attackers += 1
                     
                     piece_bb ^= lsb
             
@@ -820,7 +960,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
         material_difference = abs(white_material - black_material)
         
         # only apply mop-up if there's significant material advantage
-        if material_difference > MATERIAL_VALUE_MG[ROOK]: # roughly equivalent to a rook
+        if material_difference >= MATERIAL_VALUE_EG[ROOK] - 10: # roughly equivalent to a rook
             winning_side_is_white = white_material > black_material
             
             if winning_side_is_white:
