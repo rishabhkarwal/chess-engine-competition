@@ -185,8 +185,8 @@ def match(strat_a, strat_b, games=10):
 if __name__ == '__main__':
     multiprocessing.freeze_support()
     
-    a = sys.argv[1] if len(sys.argv) > 1 else 'hce'
-    b = sys.argv[2] if len(sys.argv) > 2 else 'hce_simple'
-    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 100
+    new = sys.argv[1] if len(sys.argv) > 1 else 'hce'
+    old = sys.argv[2] if len(sys.argv) > 2 else 'hce_simple'
+    n_games = int(sys.argv[3]) if len(sys.argv) > 3 else 500
     
-    match(a, b, n_games)
+    match(new, old, n_games)

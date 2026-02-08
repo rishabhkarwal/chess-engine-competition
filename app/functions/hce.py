@@ -14,49 +14,55 @@ MATERIAL_VALUE_EG = np.array([94, 281, 297, 512, 936, 0], dtype=np.int32)
 # Phase Values
 PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 MAX_PHASE = PHASE_WEIGHTS[KNIGHT] * 4 + PHASE_WEIGHTS[BISHOP] * 4 + PHASE_WEIGHTS[ROOK] * 4 + PHASE_WEIGHTS[QUEEN] * 2
-ENDGAME_PHASE = int(MAX_PHASE * 0.25)
-OPENING_PHASE = int(MAX_PHASE * 0.33)
+ENDGAME_PHASE = int(round(MAX_PHASE * 0.25, 0)) # when phase > this
+OPENING_PHASE = int(round(MAX_PHASE * 0.33, 0)) # when phase < this
 
 ## Penalties
 
 # Mobility
-TRAPPED_PENALTY = np.array([0, 50, 50, 35, 50, 0], dtype=np.int32)
+TRAPPED_PENALTY = np.array([0, 30, 40, 50, 50, 0], dtype=np.int32) # no pseudo-legal moves
 
 # Pawn Structure
 DOUBLED_PAWN_PENALTY_MG = 12
 DOUBLED_PAWN_PENALTY_EG = 17
 ISOLATED_PAWN_PENALTY_MG = 15
 ISOLATED_PAWN_PENALTY_EG = 20
-PAWN_ISLAND_PENALTY_MG = 10
+PAWN_ISLAND_PENALTY_MG = 6
 PAWN_ISLAND_PENALTY_EG = 15
 
 # King Safety
-KING_ZONE_ATTACK_PENALTY = 10 # per piece attacking squares near king
+KING_ZONE_ATTACK_PENALTY = 11 # per piece attacking squares near king
 
 ## Bonuses
 
 # Mobility
-MOBILITY_BONUS_MG = np.array([0, 4, 5, 2, 1, 0], dtype=np.int32) # per legal move
-MOBILITY_BONUS_EG = np.array([0, 4, 5, 2, 1, 0], dtype=np.int32)
+MOBILITY_BONUS_MG = np.array([0, 4, 4, 2, 1, 0], dtype=np.int32) # per psuedo-legal move
+MOBILITY_BONUS_EG = np.array([0, 3, 3, 7, 5, 0], dtype=np.int32)
+PASSED_PAWN_BONUS_MG = np.array([0, 2, 4, 8, 15, 24, 47, 0], dtype=np.int32)
+PASSED_PAWN_BONUS_EG = np.array([0, 7, 15, 26, 59, 89, 145, 0], dtype=np.int32)
 
 # Pieces
-BISHOP_PAIR_BONUS_MG = 30
-BISHOP_PAIR_BONUS_EG = 50
+BISHOP_PAIR_BONUS_MG = 24
+BISHOP_PAIR_BONUS_EG = 35
+ROOK_OPEN_FILE_BONUS_MG = 7
+ROOK_OPEN_FILE_BONUS_EG = 10
+ROOK_SEMI_OPEN_FILE_BONUS_MG = 5
+ROOK_SEMI_OPEN_FILE_BONUS_EG = 8
 
 # King Safety
-PAWN_SHIELD_BONUS_MG = 15 # per pawn in front of king
+PAWN_SHIELD_BONUS_MG = 12 # per pawn in front of king
 
 # Batteries
 ROOK_BATTERY_BONUS_MG = 15
-ROOK_BATTERY_BONUS_EG = 10
-ROOK_QUEEN_BATTERY_BONUS_MG = 20
-ROOK_QUEEN_BATTERY_BONUS_EG = 15
+ROOK_BATTERY_BONUS_EG = 25
+ROOK_QUEEN_BATTERY_BONUS_MG = 14
+ROOK_QUEEN_BATTERY_BONUS_EG = 19
 QUEEN_BISHOP_BATTERY_BONUS_MG = 12
 QUEEN_BISHOP_BATTERY_BONUS_EG = 8
 
 # Mop-up Evaluation
-KING_EDGE_DISTANCE_BONUS = 10  # push losing king to edge
-KING_PROXIMITY_BONUS = 5  # bring winning king close to losing king
+KING_EDGE_DISTANCE_BONUS = 15  # push losing king to edge
+KING_PROXIMITY_BONUS = 10  # bring winning king close to losing king
 
 
 ## Piece-Square Tables
@@ -374,6 +380,8 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     trapped_penalties = TRAPPED_PENALTY
     mobility_mg = MOBILITY_BONUS_MG
     mobility_eg = MOBILITY_BONUS_EG
+    passed_bonus_mg = PASSED_PAWN_BONUS_MG
+    passed_bonus_eg = PASSED_PAWN_BONUS_EG
     
     # track piece squares for later heuristics
     white_king_square = -1
@@ -413,14 +421,34 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 else:
                     black_king_square = square
             
-            # record rook positions for battery detection
             elif piece_index == ROOK:
+                # record rook positions for battery detection
                 if is_white and white_rook_count < 2:
                     white_rook_squares[white_rook_count] = square
                     white_rook_count += 1
                 elif not is_white and black_rook_count < 2:
                     black_rook_squares[black_rook_count] = square
                     black_rook_count += 1
+
+                file_idx = square % 8
+                file_mask = FILE_MASKS[file_idx]
+                
+                # check for pawns on this file
+                is_own_pawn = (own_pieces & file_mask) & (white_pawns if is_white else black_pawns)
+                is_enemy_pawn = (enemy_pawn_attacks & file_mask) if is_white else (white_pawn_attacks & file_mask)
+
+                has_own_pawns = (white_pawns if is_white else black_pawns) & file_mask
+                has_enemy_pawns = (black_pawns if is_white else white_pawns) & file_mask
+                
+                if not has_own_pawns:
+                    if not has_enemy_pawns:
+                        # open file
+                        score_mg += ROOK_OPEN_FILE_BONUS_MG if is_white else -ROOK_OPEN_FILE_BONUS_MG
+                        score_eg += ROOK_OPEN_FILE_BONUS_EG if is_white else -ROOK_OPEN_FILE_BONUS_EG
+                    else:
+                        # semi-open file
+                        score_mg += ROOK_SEMI_OPEN_FILE_BONUS_MG if is_white else -ROOK_SEMI_OPEN_FILE_BONUS_MG
+                        score_eg += ROOK_SEMI_OPEN_FILE_BONUS_EG if is_white else -ROOK_SEMI_OPEN_FILE_BONUS_EG
             
             # record queen positions
             elif piece_index == QUEEN:
@@ -626,6 +654,63 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
         penalty_eg = (black_pawn_islands - 1) * PAWN_ISLAND_PENALTY_EG
         score_mg += penalty_mg
         score_eg += penalty_eg
+
+    ## Passed Pawns
+
+    # White Passed Pawns
+    temp_wp = white_pawns
+    while temp_wp:
+        lsb = temp_wp & (~temp_wp + uint64(1))
+        sq = de_bruijn_lookup[((lsb * de_bruijn_magic) >> uint64(58))]
+        rank = sq // 8
+        file_idx = sq % 8
+        
+        if rank >= 3: # only check if sufficiently advanced
+            ahead_mask = FILE_MASKS[file_idx]
+            # add adjacent files
+            if file_idx > 0: ahead_mask |= FILE_MASKS[file_idx - 1]
+            if file_idx < 7: ahead_mask |= FILE_MASKS[file_idx + 1]
+            
+            rank_forward_mask = uint64(0)
+            for r in range(rank + 1, 8):
+                rank_forward_mask |= RANK_MASKS[r]
+            
+            ahead_mask &= rank_forward_mask
+            
+            if (black_pawns & ahead_mask) == 0:
+                bonus_m = passed_bonus_mg[rank]
+                bonus_e = passed_bonus_eg[rank]
+                score_mg += bonus_m
+                score_eg += bonus_e
+        
+        temp_wp ^= lsb
+
+    # Black Passed Pawns
+    temp_bp = black_pawns
+    while temp_bp:
+        lsb = temp_bp & (~temp_bp + uint64(1))
+        sq = de_bruijn_lookup[((lsb * de_bruijn_magic) >> uint64(58))]
+        rank = sq // 8
+        file_idx = sq % 8
+        
+        if rank <= 4: 
+            ahead_mask = FILE_MASKS[file_idx]
+            if file_idx > 0: ahead_mask |= FILE_MASKS[file_idx - 1]
+            if file_idx < 7: ahead_mask |= FILE_MASKS[file_idx + 1]
+            
+            rank_forward_mask = uint64(0)
+            for r in range(0, rank):
+                rank_forward_mask |= RANK_MASKS[r]
+            
+            ahead_mask &= rank_forward_mask
+            
+            if (white_pawns & ahead_mask) == 0:
+                bonus_m = passed_bonus_mg[7 - rank]
+                bonus_e = passed_bonus_eg[7 - rank]
+                score_mg -= bonus_m
+                score_eg -= bonus_e
+        
+        temp_bp ^= lsb
     
     ## King Safety
     if is_opening:
@@ -989,8 +1074,4 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     # Tapered Evaluation
     final_score = ((score_mg * game_phase) + (score_eg * (MAX_PHASE - game_phase))) // MAX_PHASE
     
-    # return score from perspective of side to move
-    if side_to_move == 1: # black to move
-        return -final_score
-    else: # white to move
-        return final_score
+    return -final_score if side_to_move == 1 else final_score
