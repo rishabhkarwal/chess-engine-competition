@@ -33,13 +33,17 @@ PAWN_ISLAND_PENALTY_EG = 15
 # King Safety
 KING_ZONE_ATTACK_PENALTY = 11 # per piece attacking squares near king
 
+# Bad Bishop
+BAD_BISHOP_PENALTY_MG = 4 # per own pawn on same colour squares (beyond 4)
+
 ## Bonuses
 
 # Mobility
 MOBILITY_BONUS_MG = np.array([0, 4, 4, 2, 1, 0], dtype=np.int32) # per psuedo-legal move
 MOBILITY_BONUS_EG = np.array([0, 3, 3, 7, 5, 0], dtype=np.int32)
 PASSED_PAWN_BONUS_MG = np.array([0, 2, 4, 8, 15, 24, 47, 0], dtype=np.int32)
-PASSED_PAWN_BONUS_EG = np.array([0, 7, 15, 26, 59, 89, 145, 0], dtype=np.int32)
+PASSED_PAWN_BONUS_EG = np.array([0, 7, 15, 26, 59, 75, 99, 0], dtype=np.int32)
+CONNECTED_PASSED_MULTIPLIER = 1.3 # multiplier for connected passed pawns
 
 # Pieces
 BISHOP_PAIR_BONUS_MG = 24
@@ -48,6 +52,12 @@ ROOK_OPEN_FILE_BONUS_MG = 7
 ROOK_OPEN_FILE_BONUS_EG = 10
 ROOK_SEMI_OPEN_FILE_BONUS_MG = 5
 ROOK_SEMI_OPEN_FILE_BONUS_EG = 8
+ROOK_SEVENTH_RANK_BONUS_MG = 6
+ROOK_SEVENTH_RANK_BONUS_EG = 18
+
+# Knight Outposts
+KNIGHT_OUTPOST_BONUS_MG = 13
+KNIGHT_OUTPOST_BONUS_EG = 9
 
 # King Safety
 PAWN_SHIELD_BONUS_MG = 12 # per pawn in front of king
@@ -63,6 +73,10 @@ QUEEN_BISHOP_BATTERY_BONUS_EG = 8
 # Mop-up Evaluation
 KING_EDGE_DISTANCE_BONUS = 15  # push losing king to edge
 KING_PROXIMITY_BONUS = 10  # bring winning king close to losing king
+
+# Centre Control
+CENTRE_PAWN_ATTACK_BONUS_MG = 8 # per pawn attacking centre square
+CENTRE_PIECE_BONUS_MG = 4 # per piece occupying centre square
 
 
 ## Piece-Square Tables
@@ -287,6 +301,9 @@ RANK_MASKS = np.array([
 DIAGONAL_A1H8 = uint64(0x8040201008040201)
 DIAGONAL_A8H1 = uint64(0x0102040810204080)
 
+# centre squares for control evaluation
+CENTRE_SQUARES = uint64(0x0000001818000000)  # e4, d4, e5, d5
+
 ## Helpers
 
 # de bruijn sequence for fast bit scanning
@@ -360,6 +377,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     # determine if we should calculate expensive features
     is_opening = game_phase >= OPENING_PHASE
     is_endgame = game_phase <= ENDGAME_PHASE
+    is_middlegame_or_opening = game_phase >= ENDGAME_PHASE + 5
     
     ## Pawn Attacks
     not_a_file = uint64(0xFEFEFEFEFEFEFEFE)
@@ -368,6 +386,10 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     white_pawn_attacks = ((white_pawns << uint64(9)) & not_a_file) | ((white_pawns << uint64(7)) & not_h_file)
     black_pawn_attacks = ((black_pawns >> uint64(9)) & not_h_file) | ((black_pawns >> uint64(7)) & not_a_file)
     
+    # centre control from pawn attacks
+    white_centre_control = popcount(white_pawn_attacks & CENTRE_SQUARES) * CENTRE_PAWN_ATTACK_BONUS_MG
+    black_centre_control = popcount(black_pawn_attacks & CENTRE_SQUARES) * CENTRE_PAWN_ATTACK_BONUS_MG
+    score_mg += white_centre_control - black_centre_control
 
     # cache lookup tables for performance
     psqt_mg = PSQT_MIDDLEGAME
@@ -396,6 +418,12 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     black_bishop_squares = np.zeros(2, dtype=np.int32)
     white_bishop_count = 0
     black_bishop_count = 0
+    
+    # track passed pawns for connected detection
+    white_passed_pawns = np.zeros(8, dtype=np.int32)  # stores rank of passed pawn per file (-1 if none)
+    black_passed_pawns = np.zeros(8, dtype=np.int32)
+    white_passed_pawns[:] = -1
+    black_passed_pawns[:] = -1
     
     # evaluate all pieces
     for piece_type in range(12):
@@ -431,12 +459,18 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                     black_rook_count += 1
 
                 file_idx = square % 8
+                rank = square // 8
                 file_mask = FILE_MASKS[file_idx]
                 
+                # rook on 7th rank bonus
+                if is_white and rank == 6:  # 7th rank for white
+                    score_mg += ROOK_SEVENTH_RANK_BONUS_MG
+                    score_eg += ROOK_SEVENTH_RANK_BONUS_EG
+                elif not is_white and rank == 1:  # 2nd rank for black
+                    score_mg -= ROOK_SEVENTH_RANK_BONUS_MG
+                    score_eg -= ROOK_SEVENTH_RANK_BONUS_EG
+                
                 # check for pawns on this file
-                is_own_pawn = (own_pieces & file_mask) & (white_pawns if is_white else black_pawns)
-                is_enemy_pawn = (enemy_pawn_attacks & file_mask) if is_white else (white_pawn_attacks & file_mask)
-
                 has_own_pawns = (white_pawns if is_white else black_pawns) & file_mask
                 has_enemy_pawns = (black_pawns if is_white else white_pawns) & file_mask
                 
@@ -465,6 +499,80 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 elif not is_white and black_bishop_count < 2:
                     black_bishop_squares[black_bishop_count] = square
                     black_bishop_count += 1
+                
+                # bad bishop penalty (blocked by own pawns on same colour squares)
+                bishop_square_colour = (square // 8 + square % 8) % 2
+                same_colour_pawns = 0
+                temp_pawns = white_pawns if is_white else black_pawns
+                
+                temp_copy = temp_pawns
+                while temp_copy:
+                    pawn_lsb = temp_copy & (~temp_copy + uint64(1))
+                    pawn_sq = de_bruijn_lookup[((pawn_lsb * de_bruijn_magic) >> uint64(58))]
+                    pawn_colour = (pawn_sq // 8 + pawn_sq % 8) % 2
+                    
+                    if pawn_colour == bishop_square_colour:
+                        same_colour_pawns += 1
+                    
+                    temp_copy ^= pawn_lsb
+                
+                if same_colour_pawns >= 5:
+                    penalty = (same_colour_pawns - 4) * BAD_BISHOP_PENALTY_MG
+                    if is_white:
+                        score_mg -= penalty
+                        score_eg -= penalty
+                    else:
+                        score_mg += penalty
+                        score_eg += penalty
+            
+            elif piece_index == KNIGHT:
+                # knight outpost detection
+                rank = square // 8
+                file_idx = square % 8
+                
+                # white knight outpost (ranks 4-6, files b-g)
+                if is_white and 4 <= rank <= 6 and 1 <= file_idx <= 6:
+                    # check if protected by own pawn
+                    if (white_pawn_attacks >> uint64(square)) & uint64(1):
+                        # check if can't be attacked by enemy pawns
+                        outpost_mask = FILE_MASKS[file_idx]
+                        if file_idx > 0: 
+                            outpost_mask |= FILE_MASKS[file_idx - 1]
+                        if file_idx < 7: 
+                            outpost_mask |= FILE_MASKS[file_idx + 1]
+                        
+                        forward_mask = uint64(0)
+                        for r in range(rank + 1, 8):
+                            forward_mask |= RANK_MASKS[r]
+                        
+                        if not (black_pawns & outpost_mask & forward_mask):
+                            score_mg += KNIGHT_OUTPOST_BONUS_MG
+                            score_eg += KNIGHT_OUTPOST_BONUS_EG
+                
+                # black knight outpost (ranks 1-3, files b-g)
+                elif not is_white and 1 <= rank <= 3 and 1 <= file_idx <= 6:
+                    if (black_pawn_attacks >> uint64(square)) & uint64(1):
+                        outpost_mask = FILE_MASKS[file_idx]
+                        if file_idx > 0: 
+                            outpost_mask |= FILE_MASKS[file_idx - 1]
+                        if file_idx < 7: 
+                            outpost_mask |= FILE_MASKS[file_idx + 1]
+                        
+                        forward_mask = uint64(0)
+                        for r in range(0, rank):
+                            forward_mask |= RANK_MASKS[r]
+                        
+                        if not (white_pawns & outpost_mask & forward_mask):
+                            score_mg -= KNIGHT_OUTPOST_BONUS_MG
+                            score_eg -= KNIGHT_OUTPOST_BONUS_EG
+            
+            # centre control from piece occupation
+            if (uint64(1) << uint64(square)) & CENTRE_SQUARES:
+                bonus = CENTRE_PIECE_BONUS_MG
+                if is_white:
+                    score_mg += bonus
+                else:
+                    score_mg -= bonus
             
             # add piece-square table values (includes material)
             score_mg += psqt_mg[piece_type, square]
@@ -472,7 +580,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
             
             ## Mobility Evaluation
 
-            if is_opening and 1 <= piece_index <= 4:
+            if 1 <= piece_index <= 4:
                 attack_bitboard = uint64(0)
                 
                 if piece_index == KNIGHT:
@@ -680,6 +788,10 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
             if (black_pawns & ahead_mask) == 0:
                 bonus_m = passed_bonus_mg[rank]
                 bonus_e = passed_bonus_eg[rank]
+                
+                # store for connected detection
+                white_passed_pawns[file_idx] = rank
+                
                 score_mg += bonus_m
                 score_eg += bonus_e
         
@@ -707,13 +819,35 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
             if (white_pawns & ahead_mask) == 0:
                 bonus_m = passed_bonus_mg[7 - rank]
                 bonus_e = passed_bonus_eg[7 - rank]
+                
+                # store for connected detection
+                black_passed_pawns[file_idx] = rank
+                
                 score_mg -= bonus_m
                 score_eg -= bonus_e
         
         temp_bp ^= lsb
     
+    # connected passed pawns bonus
+    for file_idx in range(7):
+        # white connected passed pawns
+        if white_passed_pawns[file_idx] >= 0 and white_passed_pawns[file_idx + 1] >= 0:
+            rank = white_passed_pawns[file_idx]
+            bonus_m = int32(passed_bonus_mg[rank] * (CONNECTED_PASSED_MULTIPLIER - 1.0))
+            bonus_e = int32(passed_bonus_eg[rank] * (CONNECTED_PASSED_MULTIPLIER - 1.0))
+            score_mg += bonus_m
+            score_eg += bonus_e
+        
+        # black connected passed pawns
+        if black_passed_pawns[file_idx] >= 0 and black_passed_pawns[file_idx + 1] >= 0:
+            rank = black_passed_pawns[file_idx]
+            bonus_m = int32(passed_bonus_mg[7 - rank] * (CONNECTED_PASSED_MULTIPLIER - 1.0))
+            bonus_e = int32(passed_bonus_eg[7 - rank] * (CONNECTED_PASSED_MULTIPLIER - 1.0))
+            score_mg -= bonus_m
+            score_eg -= bonus_e
+    
     ## King Safety
-    if is_opening:
+    if is_middlegame_or_opening:
         # white king
         if white_king_square >= 0:
             king_file = white_king_square % 8
@@ -735,7 +869,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                 
                 score_mg += shield_count * PAWN_SHIELD_BONUS_MG
             
-            # king zone attacks (IMPROVED)
+            # king zone attacks
             king_zone = king_attacks[white_king_square]
             enemy_attackers = 0
             
