@@ -49,6 +49,10 @@ ROOK_OPEN_FILE_BONUS_EG = 10
 ROOK_SEMI_OPEN_FILE_BONUS_MG = 5
 ROOK_SEMI_OPEN_FILE_BONUS_EG = 8
 
+SIMPLIFICATION_SCORE_MG = 1 # bonus when winning
+SIMPLIFICATION_SCORE_EG = 3
+WINNING_THRESHOLD = 120
+
 # King Safety
 PAWN_SHIELD_BONUS_MG = 12 # per pawn in front of king
 
@@ -356,7 +360,7 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     for piece in [KNIGHT, BISHOP, ROOK, QUEEN]:
         game_phase += (popcount(uint64(board_pieces[piece])) + popcount(uint64(board_pieces[piece + BLACK]))) * PHASE_WEIGHTS[piece]
     game_phase = min(game_phase, MAX_PHASE)
-    
+
     # determine if we should calculate expensive features
     is_opening = game_phase >= OPENING_PHASE
     is_endgame = game_phase <= ENDGAME_PHASE
@@ -1070,7 +1074,28 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
                     distance = chebyshev_distance(white_king_square, black_king_square)
                     proximity_bonus = (7 - distance) * KING_PROXIMITY_BONUS
                     score_eg -= proximity_bonus
+
+    # Simplification Bonus
+    white_piece_count = popcount(white_pieces)
+    black_piece_count = popcount(black_pieces)
+    total_pieces = white_piece_count + black_piece_count
     
+    simplification_factor = (32 - total_pieces)
+    
+    bonus_mg = simplification_factor * SIMPLIFICATION_SCORE_MG
+    bonus_eg = simplification_factor * SIMPLIFICATION_SCORE_EG
+    
+    current_estimate = ((score_mg * game_phase) + (score_eg * (MAX_PHASE - game_phase))) // MAX_PHASE
+
+    if abs(current_estimate) > WINNING_THRESHOLD: # someone is winning
+        if current_estimate > 0: # white winning
+            score_mg -= bonus_mg 
+            score_eg -= bonus_eg
+            
+        else: # black winning
+            score_mg += bonus_mg
+            score_eg += bonus_eg
+
     # Tapered Evaluation
     final_score = ((score_mg * game_phase) + (score_eg * (MAX_PHASE - game_phase))) // MAX_PHASE
     
