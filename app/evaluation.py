@@ -44,6 +44,7 @@ MOBILITY_BONUS_EG = np.array([0, 3, 3, 7, 5, 0], dtype=np.int32)
 PASSED_PAWN_BONUS_MG = np.array([0, 2, 4, 8, 15, 24, 47, 0], dtype=np.int32)
 PASSED_PAWN_BONUS_EG = np.array([0, 7, 15, 26, 59, 75, 99, 0], dtype=np.int32)
 CONNECTED_PASSED_MULTIPLIER = 1.3 # multiplier for connected passed pawns
+TEMPO = 9
 
 # Pieces
 BISHOP_PAIR_BONUS_MG = 24
@@ -1208,4 +1209,4 @@ def evaluation_function(board_pieces, board_occupancy, side_to_move):
     # Tapered Evaluation
     final_score = ((score_mg * game_phase) + (score_eg * (MAX_PHASE - game_phase))) // MAX_PHASE
     
-    return -final_score if side_to_move == 1 else final_score
+    return -final_score + TEMPO if side_to_move == 1 else final_score + TEMPO
